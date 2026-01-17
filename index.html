@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏠 House Construction Manager</title>
+
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; padding:20px; }
+    h1 { text-align:center; }
+    section { background:#fff; padding:15px; margin-bottom:20px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+    input, button, select { padding:8px; margin:5px; }
+    ul { list-style:none; padding:0; }
+    li { padding:6px 0; }
+    img { width:150px; border-radius:8px; margin:5px; }
+  </style>
+</head>
+
+<body>
+
+<h1>🏗️ House Construction Tracker</h1>
+
+<!-- IMAGE SECTION -->
+<section>
+  <h2>📸 House Images</h2>
+  <input type="file" id="imgInput" accept="image/*">
+  <div id="imgGallery"></div>
+</section>
+
+<!-- AVAILABLE MATERIALS -->
+<section>
+  <h2>📦 Available Materials</h2>
+  <input id="haveName" placeholder="Material">
+  <input id="haveQty" type="number" placeholder="Quantity">
+  <button onclick="addHave()">Add</button>
+  <ul id="haveList"></ul>
+</section>
+
+<!-- UNIT PRICE -->
+<section>
+  <h2>💵 Set Unit Price (Once)</h2>
+  <input id="priceName" placeholder="Material">
+  <input id="priceValue" type="number" placeholder="Price per unit (₹)">
+  <button onclick="setPrice()">Save Price</button>
+  <ul id="priceList"></ul>
+</section>
+
+<!-- CONSUMPTION -->
+<section>
+  <h2>🔥 Consumption</h2>
+  <select id="consName"></select>
+  <input id="consQty" type="number" placeholder="Quantity">
+  <button onclick="consume()">Consume</button>
+  <ul id="consList"></ul>
+</section>
+
+<!-- FUTURE NEEDS -->
+<section>
+  <h2>🛒 Future Materials Needed</h2>
+  <input id="needName" placeholder="Material">
+  <input id="needQty" type="number" placeholder="Quantity">
+  <button onclick="addNeed()">Add</button>
+  <ul id="needList"></ul>
+</section>
+
+<!-- AUTO COST -->
+<section>
+  <h2>💰 Auto Cost Summary</h2>
+  <ul id="costList"></ul>
+  <h3>Total Cost: ₹ <span id="totalCost">0</span></h3>
+</section>
+window.addEventListener('beforeunload', () => {
+  save();
+});
+
+<script>
+/* ---------- IMAGE STORAGE ---------- */
+let db;
+const request = indexedDB.open('ImageDB', 1);
+request.onupgradeneeded = e => {
+  db = e.target.result;
+  db.createObjectStore('images', { autoIncrement: true });
+};
+request.onsuccess = e => { db = e.target.result; loadImages(); };
+
+function saveImage(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const tx = db.transaction('images','readwrite');
+    tx.objectStore('images').add(reader.result);
+    tx.oncomplete = loadImages;
+  };
+  reader.readAsDataURL(file);
+}
+
+function loadImages(){
+  imgGallery.innerHTML='';
+  const tx = db.transaction('images','readonly');
+  tx.objectStore('images').openCursor().onsuccess = e => {
+    const c = e.target.result;
+    if(c){
+      const img=document.createElement('img');
+      img.src=c.value;
+      imgGallery.appendChild(img);
+      c.continue();
+    }
+  }
+}
+
+imgInput.onchange=e=>e.target.files[0]&&saveImage(e.target.files[0]);
+
+/* ---------- DATA ---------- */
+let have = JSON.parse(localStorage.getItem('have'))||{};
+let needs = JSON.parse(localStorage.getItem('needs'))||[];
+let consumption = JSON.parse(localStorage.getItem('consumption'))||[];
+let prices = JSON.parse(localStorage.getItem('prices'))||{};
+let costLog = JSON.parse(localStorage.getItem('costLog'))||[];
+
+function save(){
+  localStorage.setItem('have',JSON.stringify(have));
+  localStorage.setItem('needs',JSON.stringify(needs));
+  localStorage.setItem('consumption',JSON.stringify(consumption));
+  localStorage.setItem('prices',JSON.stringify(prices));
+  localStorage.setItem('costLog',JSON.stringify(costLog));
+}
+
+/* ---------- FUNCTIONS ---------- */
+function addHave(){
+  const n=haveName.value.toLowerCase().trim();
+  const q=+haveQty.value;
+  if(!n||q<=0) return;
+  have[n]=(have[n]||0)+q;
+  needs=needs.map(x=>x.name===n?{name:n,qty:Math.max(0,x.qty-q)}:x).filter(x=>x.qty>0);
+  haveName.value=haveQty.value='';
+  save(); render();
+}
+
+function setPrice(){
+  const n=priceName.value.toLowerCase().trim();
+  const p=+priceValue.value;
+  if(!n||p<=0) return;
+  prices[n]=p;
+  priceName.value=priceValue.value='';
+  save(); render();
+}
+
+function consume(){
+  const n=consName.value;
+  const q=+consQty.value;
+  if(!have[n]||q<=0||have[n]<q) return alert('Not enough stock');
+
+  have[n]-=q;
+  consumption.push({name:n,qty:q});
+
+  if(prices[n]){
+    costLog.push({name:n,qty:q,price:prices[n]});
+  }
+
+  consQty.value='';
+  save(); render();
+}
+
+function addNeed(){
+  const n=needName.value.toLowerCase().trim();
+  const q=+needQty.value;
+  if(!n||q<=0) return;
+  if(have[n]){
+    const r=q-have[n];
+    if(r>0) needs.push({name:n,qty:r});
+  } else needs.push({name:n,qty:q});
+  needName.value=needQty.value='';
+  save(); render();
+}
+
+function render(){
+  haveList.innerHTML=''; consName.innerHTML='';
+  Object.keys(have).forEach(k=>{
+    haveList.innerHTML+=`<li>${k} : ${have[k]}</li>`;
+    consName.innerHTML+=`<option>${k}</option>`;
+  });
+
+  consList.innerHTML=consumption.map(c=>`<li>${c.name} - ${c.qty}</li>`).join('');
+  needList.innerHTML=needs.map(n=>`<li>${n.name} : ${n.qty}</li>`).join('');
+
+  priceList.innerHTML=Object.keys(prices).map(p=>`<li>${p} : ₹${prices[p]}</li>`).join('');
+
+  let total=0; costList.innerHTML='';
+  costLog.forEach(c=>{
+    const s=c.qty*c.price; total+=s;
+    costList.innerHTML+=`<li>${c.name} : ${c.qty} × ₹${c.price} = ₹${s}</li>`;
+  });
+  totalCost.textContent=total;
+}
+
+render();
+</script>
+
+</body>
+</html>
